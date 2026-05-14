@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "installCommand": "npm i -g pnpm && cd ASAP-Dispatch/ASAP-Dispatch && pnpm install --no-frozen-lockfile",
-  "buildCommand": "cd ASAP-Dispatch/ASAP-Dispatch/artifacts/asap-dispatch && npx vite build --config vite.config.ts",
-  "outputDirectory": "ASAP-Dispatch/ASAP-Dispatch/artifacts/asap-dispatch/dist/public"
+  "buildCommand": "pnpm --filter @workspace/asap-dispatch run build",
+  "outputDirectory": "artifacts/asap-dispatch/dist/public",
+  "framework": "vite"
 }
