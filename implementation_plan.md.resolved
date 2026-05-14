@@ -1,0 +1,302 @@
+# ASAP Dispatch — Full Execution Roadmap
+
+## Verified Connections
+
+| Service | Status | Details |
+|---------|--------|---------|
+| **Supabase** | ✅ MCP Connected | Org: `ASAP security` (elhusrqjnbbrwevwdjuy), Free plan. 2 projects exist but both INACTIVE/paused |
+| **GitHub** | ✅ MCP Connected | Repo: `gergisfawzy-venom/ASAP-SaaS`, branch: `main` |
+| **Vercel** | ✅ MCP Connected | Project `asap-dispatch-frontend` exists, no deployments yet |
+| **Agora** | ✅ Account created | User will provide App ID and App Certificate when needed |
+
+> [!IMPORTANT]
+> **Execution Rule**: Every task ends with a **✅ CONFIRM** checkpoint. The executor must present results to the user and get explicit approval before moving to the next task. No task is skipped or auto-advanced.
+
+---
+
+## Build Order: Phase 0 → Phase 2 → Phase 1 → Phase 3
+
+**Minimum Live Demo** (13 tasks, ~24h): Tasks 0.1–0.5 + 2.1–2.6 + 1.1–1.3
+
+---
+
+# PHASE 0 — Foundation
+
+*Everything depends on this phase. Complete it first.*
+
+---
+
+## TASK 0.1 — Supabase Project Setup
+
+**Goal**: Get a live Supabase project connected to the web app.
+
+**Current State**: Two projects exist (`ASAP security`, `ASAP`) but both are INACTIVE/paused.
+
+**Steps**:
+
+1. **Decide**: Restore existing project `ASAP` (komwlazrngttyoirusew) OR create a new one
+   - Restoring is free and instant
+   - Creating new counts against the free-tier 2-project limit
+2. **Restore/Create** via Supabase MCP
+3. **Get credentials**: Retrieve the Project URL and Anon Key via MCP
+4. **Create `src/lib/supabase.ts`** in the web app:
+   ```typescript
+   import { createClient } from '@supabase/supabase-js';
+   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+   const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+   export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+   ```
+5. **Create `.env.local`** in `artifacts/asap-dispatch/`:
+   ```
+   VITE_SUPABASE_URL=https://<project-ref>.supabase.co
+   VITE_SUPABASE_ANON_KEY=<anon-key>
+   ```
+6. **Add env vars to Vercel** project dashboard
+7. **Verify**: Run the web app, call `supabase.auth.getSession()` — should return a valid response with no errors
+
+**Done when**: `supabase.auth.getSession()` returns a valid response from the running web app.
+
+**✅ CONFIRM**: Show user the connection test result before proceeding.
+
+---
+
+## TASK 0.2 — Database Schema
+
+**Goal**: Create all 22 tables in Supabase that replace the mock data.
+
+**Steps**:
+
+1. **Run migration via Supabase MCP** (`apply_migration`) with the full CREATE TABLE SQL
+2. Tables to create (22 total): `companies`, `profiles`, `guards`, `dispatchers`, `sites`, `checkpoints`, `shifts`, `shift_templates`, `shift_tasks`, `incidents`, `incident_logs`, `messages`, `channels`, `calls`, `voicemails`, `certifications`, `notifications`, `swap_requests`, `time_off_requests`, `location_history`, `dispatcher_clock_records`, `audit_log`
+3. Each table includes `company_id` for multi-tenancy where applicable
+4. All IDs are `uuid` with `gen_random_uuid()` default
+5. **Verify**: Run `list_tables` via MCP — all 22 should appear
+
+**Done when**: All 22 tables exist in Supabase with no errors.
+
+**✅ CONFIRM**: Show user the table list before proceeding.
+
+---
+
+## TASK 0.3 — Row Level Security (RLS)
+
+**Goal**: Lock every table so users only see their own company's data.
+
+**Steps**:
+
+1. **Enable RLS** on every table: `ALTER TABLE <table> ENABLE ROW LEVEL SECURITY`
+2. **Company-scoped SELECT** on every table with `company_id`:
+   ```sql
+   CREATE POLICY "company_isolation" ON <table>
+   FOR SELECT USING (company_id = (SELECT company_id FROM profiles WHERE id = auth.uid()));
+   ```
+3. **Role-specific write policies**:
+   - Guards: read/write only their own row in `guards`
+   - Admins: full CRUD on all company tables
+   - Dispatchers: read all + write on shifts/incidents/messages/calls
+   - Supervisors: read all + write on incidents and shifts only
+4. **Profiles table**: users can read their own profile, admins can read/write all company profiles
+5. **Verify**: Run `get_advisors` (security) to check for missing RLS policies
+
+**Done when**: A user logged in as Company A cannot read any row belonging to Company B.
+
+**✅ CONFIRM**: Show security advisor results before proceeding.
+
+---
+
+## TASK 0.4 — Authentication
+
+**Goal**: Replace demo quick-login with real Supabase auth.
+
+**Steps**:
+
+1. **Enable Email auth** in Supabase Authentication settings (likely already enabled)
+2. **Modify `LoginView.tsx`**:
+   - Connect email/password form to `supabase.auth.signInWithPassword()`
+   - Add "Forgot password?" link → `supabase.auth.resetPasswordForEmail()`
+   - Keep demo quick-login tiles (will point at real seeded accounts)
+3. **Modify `App.tsx`**:
+   - On app load: `supabase.auth.getSession()` → if session exists, skip login
+   - Listen for `onAuthStateChange` to handle session changes
+4. **Modify `TopBar.tsx`**:
+   - Logout button → `supabase.auth.signOut()` → redirect to login
+5. **Modify `AppContext.tsx`**:
+   - After login, fetch user's `profiles` row → store as `currentUser`
+   - Change `CurrentUser` type: `id` becomes `string` (uuid)
+6. **Verify**: Real email/password login works, session survives refresh, logout works
+
+**Done when**: Login works with real credentials, session persists across refresh, logout returns to login.
+
+**✅ CONFIRM**: Demonstrate login/logout flow before proceeding.
+
+---
+
+## TASK 0.5 — Seed Demo Data
+
+**Goal**: Populate database with realistic data so the demo looks full on first login.
+
+**Steps**:
+
+1. **Create Supabase auth users** (7 total) via Edge Function or admin API:
+   - Admin: Reema Hassan (admin@asap.dispatch / Demo1234!)
+   - Dispatcher: Daniel Chen (dispatch@asap.dispatch / Demo1234!)
+   - Supervisor: Samir Najjar (supervisor@asap.dispatch / Demo1234!)
+   - Guards: Marcus Johnson, Diana Okafor, James Rivera (guard1/2/3@asap.dispatch)
+   - Client: Sarah Mitchell (client@asap.dispatch / Demo1234!)
+2. **Insert via Supabase MCP** (`execute_sql`):
+   - 1 company: "ASAP Security"
+   - 7 profiles linked to auth users
+   - 5 sites with 3–4 checkpoints each
+   - 2 weeks of shifts (guards + dispatchers)
+   - 6 incidents across severities
+   - 20 messages between dispatcher and guards
+   - 5 call log entries, 3 voicemails
+   - 3 dispatcher clock records
+   - Certifications for each guard
+3. **Update quick-login tiles** in `LoginView.tsx` to use real seeded emails
+4. **Verify**: Login with any demo account → dashboard shows populated data
+
+**Done when**: Logging in with any demo account shows a fully populated dashboard.
+
+**✅ CONFIRM**: Show populated dashboard screenshots before proceeding.
+
+---
+
+# PHASE 2 — Mobile App
+
+*Build the guard app before wiring the web backend.*
+
+---
+
+## TASK 2.1 — Expo Project Setup
+
+**Goal**: Create the React Native mobile app connected to Supabase.
+
+**Steps**:
+
+1. **Create Expo app** in project root:
+   ```bash
+   npx create-expo-app asap-mobile --template blank-typescript
+   ```
+2. **Install dependencies**:
+   ```bash
+   npx expo install @supabase/supabase-js expo-location expo-camera expo-barcode-scanner expo-notifications expo-local-authentication react-native-maps @react-navigation/native @react-navigation/bottom-tabs @react-native-async-storage/async-storage
+   ```
+3. **Create `.env`** with Supabase URL + anon key + Agora App ID
+4. **Create `src/lib/supabase.ts`** — same client pattern as web
+5. **Test launch**: `npx expo start` → scan QR with Expo Go on phone
+6. **Push to GitHub** on a new branch `feature/mobile-app`
+
+**Done when**: App opens on a real phone via Expo Go with no errors.
+
+**✅ CONFIRM**: Show successful Expo launch before proceeding.
+
+---
+
+## TASK 2.2 — Mobile Authentication
+
+**Goal**: Login screen that routes guards and clients correctly.
+
+**Steps**:
+
+1. **Build `LoginScreen`**: Role selector (Guard | Client) + email/password form
+2. **Connect to Supabase**: `supabase.auth.signInWithPassword()`
+3. **Persist session**: Store in AsyncStorage → auto-login on reopen
+4. **Route by role**: After login, fetch `profiles.role` → route to GuardHome or ClientHome
+5. **Add biometric unlock**: `expo-local-authentication` as shortcut after first login
+
+**Done when**: Login works with real credentials. Closing/reopening keeps user logged in.
+
+**✅ CONFIRM**: Demonstrate mobile login on real device before proceeding.
+
+---
+
+## TASK 2.3 — Guard Home Screen
+
+**Goal**: Main screen with all primary guard actions.
+
+**UI Elements**:
+- Active shift card (site name, start time, elapsed timer)
+- Clock In button (disabled until 30 min before shift)
+- Clock Out button (replaces Clock In after clocking in)
+- Next checkpoint card with countdown
+- Scan Checkpoint button → opens camera
+- Submit Incident button → opens incident form
+- **PANIC** button — red, full width, bottom of screen
+- Chat icon in header with unread badge
+
+**Done when**: Guard can see their shift and all action buttons on one screen.
+
+**✅ CONFIRM**: Show guard home screen UI before proceeding.
+
+---
+
+## TASK 2.4 — GPS Tracking
+
+**Goal**: Guard location streams to Supabase, appears live on web map.
+
+**Steps**:
+
+1. **Request permissions**: Foreground + background via `expo-location`
+2. **Start watching on clock-in**: Check every 60 seconds
+3. **Distance filter**: Compare new coords to `last_lat/last_lng` — skip if < 10 meters
+4. **Write to Supabase**: Update `guards.lat/lng/last_lat/last_lng/last_activity` + insert `location_history`
+5. **Geofence check**: If outside site radius → insert `geofence_breach` notification
+6. **Stop on clock-out**: Stop all location watching
+
+**Done when**: Guard walking with phone → dot moves on web Tracker map. Standing still → no DB writes.
+
+**✅ CONFIRM**: Demonstrate live dot movement on web map before proceeding.
+
+---
+
+## TASK 2.5 — Checkpoint Scanning
+
+**Goal**: Guard marks checkpoints complete via QR scan or GPS proximity.
+
+**Method 1 — QR Scan**: Open camera → decode checkpoint ID → verify within 50m → mark complete
+**Method 2 — GPS Proximity**: Press "I'm Here" → find nearest checkpoint within 50m → mark complete
+
+**Both write**: `checkpoints.status = 'completed'`, `last_scanned_at = now()`, `last_scanned_by = guard`
+
+**Done when**: Guard can complete a checkpoint by scanning QR or pressing "I'm Here."
+
+**✅ CONFIRM**: Demonstrate checkpoint scan flow before proceeding.
+
+---
+
+## TASK 2.6 — Panic Button
+
+**Goal**: One-press SOS alerting all dispatchers within 3 seconds.
+
+**Steps**:
+
+1. **2-second hold** to activate (prevents accidental triggers)
+2. **On activation**: Get GPS → update `guards.panic_active = true` + `panic_lat/lng` → send push to all dispatchers
+3. **Guard screen**: Switches to "PANIC ACTIVE — Help is on the way" with cancel option
+4. **Cancel**: 3-second hold → `guards.panic_active = false`
+
+**Done when**: Holding panic on phone triggers red alert banner on web dashboard within 3 seconds.
+
+**✅ CONFIRM**: Demonstrate panic → web alert flow before proceeding.
+
+---
+
+## TASK 2.7–2.14 — Remaining Mobile Tasks
+
+| Task | Name | Hours | Key Action |
+|------|------|-------|------------|
+| 2.7 | Submit Incident | 2h | Incident form + photo upload + GPS auto-fill |
+| 2.8 | Guard Chat | 2h | Realtime messages with dispatcher |
+| 2.9 | Voice Calls (Agora) | 3h | Real two-way voice calls (depends on 1.13) |
+| 2.10 | Schedule + Timesheet | 2h | View upcoming shifts + past hours |
+| 2.11 | Client Home Screen | 2h | Live map of guards at client's site |
+| 2.12 | Client Service Requests | 2h | Shift extension + extra guard requests |
+| 2.13 | Push Notifications | 2h | Expo Push for all critical alerts |
+| 2.14 | QR Code Generator | 1h | Print QR sheets for checkpoints (depends on 1.9) |
+
+Each task follows the same **✅ CONFIRM** pattern.
+
+---
+
+*Phase 1 (Web Backend) and Phase 3 (Advanced) continue in Part 2 of this roadmap.*

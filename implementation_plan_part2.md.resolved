@@ -1,0 +1,419 @@
+# ASAP Dispatch — Execution Roadmap (Part 2: Web Backend + Advanced)
+
+*Continuation of Part 1. Complete Phase 0 and core Phase 2 tasks before starting here.*
+
+---
+
+# PHASE 1 — Web Backend
+
+*Connect the existing demo views to real Supabase data and realtime.*
+
+---
+
+## TASK 1.1 — Replace Mock Data with Supabase Queries
+
+**Goal**: Remove all mock arrays from the web app, replace with real database queries.
+
+**Steps**:
+
+1. **Create `src/hooks/` folder** with one custom hook per entity:
+   - `useGuards()` — fetches `guards` joined with `profiles`
+   - `useSites()` — fetches `sites` joined with `checkpoints`
+   - `useShifts()` — fetches `shifts` joined with `profiles` and `sites`
+   - `useIncidents()` — fetches `incidents` joined with `profiles` and `sites`
+   - `useMessages()` — fetches `messages` for current user
+   - `useCalls()` — fetches `calls`
+   - `useDispatchers()` — fetches `dispatchers` joined with `profiles`
+   - `useNotifications()` — fetches `notifications` for current user
+2. **Refactor `AppContext.tsx`**:
+   - Remove all imports from `@/data/seed`
+   - Initialize state from hooks instead of hardcoded arrays
+   - Change all `id: number` to `id: string` (uuid) across types
+3. **Update `types/index.ts`**: All IDs become `string`, match Supabase schema
+4. **Update all 13 views** to use hook data instead of context mock data
+5. **Delete `src/data/seed.ts`** (replaced by server-side seed in Task 0.5)
+
+**Done when**: Dashboard, scheduler, tracker, and all views load real data. No mock arrays remain.
+
+**✅ CONFIRM**: Show all views loading real data before proceeding.
+
+---
+
+## TASK 1.2 — Realtime Guard Positions
+
+**Goal**: Guard markers move automatically on the Tracker map.
+
+**Steps**:
+
+1. In `TrackerView`, subscribe to `guards` table:
+   ```typescript
+   supabase.channel('guards')
+     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'guards' }, handler)
+     .subscribe()
+   ```
+2. On row update with new `lat/lng` → update marker position without page reload
+3. On first load → query last 50 `location_history` rows per guard → render patrol trail as polyline
+4. Trail updates with each new position write
+
+**Done when**: Guard walks with phone → dot moves on web map in real time.
+
+**✅ CONFIRM**: Demonstrate live position tracking before proceeding.
+
+---
+
+## TASK 1.3 — Realtime Panic
+
+**Goal**: Panic from guard's phone appears on all dispatcher sessions within 3 seconds.
+
+**Steps**:
+
+1. Subscribe to `guards.panic_active` changes in the app's root component
+2. When `panic_active = true` → show panic banner + auto-focus guard on Tracker
+3. Insert a `panic` notification with guard details
+4. Dispatcher clicks "Resolve" → `guards.panic_active = false`, remove banner
+
+**Done when**: Guard holds panic on phone → red alert banner fires on web within 3 seconds.
+
+**✅ CONFIRM**: Demonstrate panic flow end-to-end before proceeding.
+
+---
+
+## TASK 1.4 — Realtime Notifications
+
+**Goal**: All system events create real notifications in the bell menu instantly.
+
+**Steps**:
+
+1. Subscribe to `notifications` table for current user via Realtime
+2. New row → add to notification list + increment bell badge
+3. Click notification → mark `read = true`
+4. Dismiss → set `dismissed = true`
+5. Handle types: `panic`, `geofence_breach`, `guard_late`, `dispatcher_late`, `incident_new`, `checkpoint_missed`, `cert_expiring`, `client_request`
+
+**Done when**: Filing incident from mobile triggers notification in web bell within 5 seconds.
+
+**✅ CONFIRM**: Demonstrate notification flow before proceeding.
+
+---
+
+## TASK 1.5 — Incidents — Real CRUD
+
+**Goal**: Full incident lifecycle with real database operations.
+
+**Steps**:
+
+1. Incident list loads from `incidents` table with real filters
+2. Create → `supabase.from('incidents').insert()`
+3. Auto-generate incident number: `INC-{YEAR}-{SEQUENCE padded to 4}`
+4. Add category dropdown: Theft, Vandalism, Medical Emergency, Trespassing, Fire, Accident, Suspicious Person, Property Damage, Disturbance, Other
+5. Timeline panel: load `incident_logs`, display chronologically, text input for new entries
+6. Status progression: open → in-review → resolved (resolved requires supervisor/admin)
+
+**Done when**: Full lifecycle — create, update, log entries, resolve — works end-to-end.
+
+**✅ CONFIRM**: Demonstrate full incident lifecycle before proceeding.
+
+---
+
+## TASK 1.6 — File and Photo Upload
+
+**Goal**: Photos attached to incidents and messages via Supabase Storage.
+
+**Steps**:
+
+1. Create Storage bucket `incident-evidence` (private, 50MB limit)
+2. Create bucket `chat-attachments` (private)
+3. Incident modal: file input → upload to `incident-evidence` → save URL as `photo_url`
+4. ChatView: paperclip button → upload to `chat-attachments` → send with `attachment_url`
+5. Display thumbnails inline in both views
+
+**Done when**: Photo attached to incident is visible in incident detail.
+
+**✅ CONFIRM**: Show photo upload/display before proceeding.
+
+---
+
+## TASK 1.7 — Recurring Shifts
+
+**Goal**: Create shift patterns that auto-generate future shifts.
+
+**Steps**:
+
+1. Add "Recurring" toggle to Add Shift modal
+2. When on: show day-of-week checkboxes + date range
+3. Save: insert into `shift_templates` + generate individual `shifts` rows
+4. Generated shifts show repeat icon in scheduler
+5. Works for both guard and dispatcher assignees
+
+**Done when**: Creating recurring Monday shift generates all Monday records in date range.
+
+**✅ CONFIRM**: Show generated recurring shifts before proceeding.
+
+---
+
+## TASK 1.8 — Guard Clock-In/Clock-Out (Web View)
+
+**Steps**:
+
+1. Subscribe to `shifts` changes for `actual_clock_in`/`actual_clock_out`
+2. Clock-in → update guard status to "active", start elapsed timer
+3. Clock-out → mark shift completed
+4. Late (>15 min) → insert `guard_late` notification
+5. Timesheet: scheduled vs actual, orange highlight if >10 min difference
+6. Supervisor "Approve Week" button
+
+**Done when**: Guard clocks in on phone → web Timesheet shows actual clock-in time immediately.
+
+**✅ CONFIRM**: Demonstrate clock-in reflection before proceeding.
+
+---
+
+## TASK 1.9 — Checkpoint Management (Web)
+
+**Steps**:
+
+1. Subscribe to `checkpoints` → update marker color on map
+2. Add/edit/delete checkpoints in site detail modal
+3. Show `last_scanned_at` and `last_scanned_by` per checkpoint
+4. Edge Function: every 5 min check for missed checkpoints → insert notification
+
+**Done when**: Guard scans checkpoint on phone → web map marker changes color within 3 seconds.
+
+**✅ CONFIRM**: Demonstrate checkpoint sync before proceeding.
+
+---
+
+## TASK 1.10 — Guard Certifications
+
+**Steps**:
+
+1. "Certifications" tab in guard edit modal (Guard Card / CPR / First Aid / Firearms / Other)
+2. Fields: type, license number, issued date, expiry date, document upload
+3. Dashboard warning card: certs expiring within 30 days
+4. Scheduler: block armed shift assignment if firearms cert expired
+
+**Done when**: Expiring cert shows as warning on dashboard 30 days before expiry.
+
+**✅ CONFIRM**: Show certification warning before proceeding.
+
+---
+
+## TASK 1.11 — Reports — Real Export
+
+**Steps**:
+
+1. Install `jspdf` + `jspdf-autotable`
+2. Replace all stub export toasts with real file generation
+3. Build: DAR PDF, Hours CSV, Incident Summary PDF, Patrol Compliance PDF
+4. Date range picker with presets (Today, This Week, This Month, Custom)
+5. Replace all `Math.random()` in charts with real aggregation queries
+
+**Done when**: Every Export button downloads a real file with real data.
+
+**✅ CONFIRM**: Download and show sample reports before proceeding.
+
+---
+
+## TASK 1.12 — Settings — Company Tab + Save
+
+**Steps**:
+
+1. Add "Company" tab: name, logo upload, timezone, address
+2. Wire all Save buttons to `supabase.from('profiles').update()` / `companies.update()`
+3. Full IANA timezone list
+4. Success/error toasts
+
+**Done when**: Change any setting → Save → persists after page refresh.
+
+**✅ CONFIRM**: Demonstrate settings persistence before proceeding.
+
+---
+
+## TASK 1.13 — VoIP — Agora Web
+
+**Goal**: Real voice calls between dispatcher (web) and guard (mobile).
+
+**Prerequisites**: User provides Agora App ID and App Certificate.
+
+**Steps**:
+
+1. Install `agora-rtc-sdk-ng` in web app
+2. Create Supabase Edge Function `get-agora-token` — generates RTC token server-side using App Certificate
+3. Channel naming: `guard-{guardId}`
+4. Dispatcher clicks "Call" → fetch token → join channel → start audio
+5. GlobalCallUI: wire mute/unmute + end call
+6. On end: calculate duration → insert `calls` row
+
+**Agora Setup Guide**:
+1. Go to [console.agora.io](https://console.agora.io)
+2. Select your project → copy **App ID**
+3. Go to project Config → enable **App Certificate** → copy it
+4. Store App Certificate as Supabase secret (never expose to client)
+
+**Done when**: Dispatcher clicks "Call Marcus" → Marcus's phone rings → real two-way voice.
+
+**✅ CONFIRM**: Demonstrate voice call before proceeding.
+
+---
+
+## TASK 1.15 — Remove Demo Artifacts
+
+**Steps**:
+
+1. Add `VITE_DEMO_MODE` env var (true for demo Vercel, false/unset for production)
+2. Wrap "Simulate Panic" and "Simulate Geofence Breach" buttons with demo mode check
+3. Wrap quick-login tiles with same check
+4. Confirm all `Math.random()` removed (covered in 1.11)
+
+**Done when**: Production shows no simulate buttons. Demo deployment still shows them.
+
+**✅ CONFIRM**: Verify both deployments before proceeding.
+
+---
+
+## TASK 1.16 — Dispatcher Clock-In/Clock-Out
+
+**Steps**:
+
+1. Clock In/Out button on dispatcher dashboard (dispatcher role only)
+2. Clock-in → insert `dispatcher_clock_records` + update `dispatchers.status = 'on-duty'`
+3. Clock-out → update record + status to `off-duty`
+4. Admin: "On-Duty Now" section with live elapsed timers via Realtime
+5. Late (>15 min) → `dispatcher_late` notification
+6. Timesheet: add "Dispatchers" tab alongside "Guards"
+
+**Done when**: Dispatcher clocks in → admin sees them on-duty with running timer.
+
+**✅ CONFIRM**: Demonstrate dispatcher clock flow before proceeding.
+
+---
+
+## TASK 1.17 — Dispatcher Scheduling
+
+**Steps**:
+
+1. Scheduler toggle: "Guards" | "Dispatchers" | "All"
+2. Dispatcher view uses same card/drag-drop UI
+3. Add Shift modal: `assignee_role` selector (Guard/Dispatcher), site optional for dispatchers
+4. Dispatcher dashboard: "Your Next Shift" card with Clock In button
+5. Recurring shifts work for dispatchers (from Task 1.7)
+6. Overtime: >30 min over schedule → orange highlight + admin notification
+7. Swap requests via `swap_requests` table
+
+**Done when**: Admin creates dispatcher shift → dispatcher sees "Your next shift" on dashboard.
+
+**✅ CONFIRM**: Show dispatcher scheduling before proceeding.
+
+---
+
+# PHASE 3 — Advanced Features
+
+*Build after all core Phase 0 + 1 + 2 tasks work.*
+
+---
+
+## TASK 3.1 — Historical GPS Playback
+
+1. Date picker + time scrubber in TrackerView sidebar
+2. Query `location_history` for guard + date range
+3. Animate marker with Play/Pause/1×/2×/4× controls
+4. Draw trail as polyline
+
+**Done when**: Select guard + past date → animated patrol path plays on map.
+
+**✅ CONFIRM** before next task.
+
+---
+
+## TASK 3.2 — Lone Worker Timer
+
+1. "Lone Worker Interval" field in site settings (default 30 min)
+2. Edge Function on pg_cron every 5 min: query guards where `last_activity < now() - interval`
+3. Insert alert notification + push to guard "Check-in required"
+4. Guard taps notification → updates `last_activity`
+
+**Done when**: Inactive guard for 30 min triggers dispatcher notification.
+
+**✅ CONFIRM** before next task.
+
+---
+
+## TASK 3.3 — Patrol Compliance Report
+
+1. New report type with guard/site/date range filters
+2. Calculate checkpoints scanned vs required per interval
+3. Table: guard, site, required, completed, % compliance
+4. Color code: green ≥90%, yellow 70–89%, red <70%
+5. Export as PDF with company logo
+
+**Done when**: Generate + export patrol compliance report for any guard/date range.
+
+**✅ CONFIRM** before next task.
+
+---
+
+## TASK 3.4 — Incident PDF Export
+
+1. "Export PDF" button on incident detail
+2. Template: logo, number, date, guard, site, category, severity, description, timeline, photo, GPS, sign-off
+3. Auto-generate PDF on status change to "resolved" → store in Supabase Storage
+
+**Done when**: Export PDF downloads formatted incident report.
+
+**✅ CONFIRM** before next task.
+
+---
+
+## TASK 3.5 — Client Web Portal
+
+1. Add `/client` route with minimal layout (no sidebar)
+2. Client login → RLS restricts to their site only
+3. Show: live guard map, shift roster, incident list (read-only)
+4. "Contact Dispatcher" chat button
+
+**Done when**: Client logs in → sees their guards on live map, no other data accessible.
+
+**✅ CONFIRM** before next task.
+
+---
+
+## TASK 3.7 — Audit Log
+
+1. Database triggers on writes to: guards, shifts, incidents, profiles, sites, certifications, companies
+2. Log: actor, action (INSERT/UPDATE/DELETE), entity type/id, old/new value (jsonb)
+3. Also log from app: login, logout, settings save
+4. "Audit Log" tab in Settings — searchable by actor, date, action
+
+**Done when**: Every admin action appears in audit log with actor + timestamp + before/after.
+
+**✅ CONFIRM** before marking Phase 3 complete.
+
+---
+
+# Execution Summary
+
+| Sprint | Tasks | Est. Hours | Milestone |
+|--------|-------|-----------|-----------|
+| Sprint 1 | 0.1→0.5 | 8h | Backend live + seeded |
+| Sprint 2 | 1.1→1.3, 1.15 | 9h | Web shows real data + realtime |
+| Sprint 3 | 2.1→2.6 | 14h | **🎯 Minimum Live Demo** |
+| Sprint 4 | 1.4→1.13 | 25h | Full web features |
+| Sprint 5 | 2.7→2.14, 1.16, 1.17 | 18h | Full mobile + dispatcher features |
+| Sprint 6 | 3.1→3.7 | 14h | Advanced features |
+| **Total** | **35 tasks** | **~88h** | **Full SaaS** |
+
+---
+
+# Final Verification — The Target Demo
+
+After completing the minimum 13-task path (Sprint 1–3):
+
+1. ✅ Open web dispatcher dashboard on laptop
+2. ✅ Open guard app on phone via Expo Go
+3. ✅ Log in with seeded accounts
+4. ✅ Guard walks around → dot moves on web map in real time
+5. ✅ Guard presses panic → alert fires on web within 3 seconds
+6. ✅ Guard clocks in → shift goes active on web
+7. ✅ Guard scans checkpoint → marker updates on web map
+
+**Everything in this roadmap builds toward that outcome.**
