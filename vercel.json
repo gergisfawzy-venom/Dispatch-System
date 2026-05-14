@@ -1,6 +1,7 @@
 {
   "version": 2,
+  "framework": null,
+  "installCommand": "pnpm install",
   "buildCommand": "pnpm --filter @workspace/asap-dispatch run build",
-  "outputDirectory": "artifacts/asap-dispatch/dist/public",
-  "framework": "vite"
+  "outputDirectory": "artifacts/asap-dispatch/dist/public"
 }
